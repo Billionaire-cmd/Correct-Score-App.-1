@@ -2,7 +2,7 @@ import streamlit as st
 from scipy.stats import poisson
 
 # Title of the App
-st.title("Football Match Outcome Predictor")
+st.title("🤖 Rabiotic Football Match Outcome Predictor")
 
 # Sidebar Input
 st.sidebar.header("Input Team Data")
