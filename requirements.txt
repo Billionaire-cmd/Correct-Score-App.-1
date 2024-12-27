@@ -7,3 +7,4 @@ altair
 flask-sqlalchemy
 flask-cors
 flask
+sqlite3
