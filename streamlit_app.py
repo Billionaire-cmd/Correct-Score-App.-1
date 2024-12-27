@@ -63,7 +63,7 @@ def run_flask():
 Thread(target=run_flask).start()
 
 # Streamlit App Interface
-st.title("📉📈License Key Validation and Bot Activation")
+st.title("📉📈🤖License Key Validation and Bot Activation")
 
 # Form for entering license key
 with st.form("License Validation"):
