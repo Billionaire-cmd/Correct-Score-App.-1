@@ -22,7 +22,7 @@ license_db = {
 }
 
 # Streamlit app layout
-st.title("License Key Validation System")
+st.title("🤖🔑License Key Validation System")
 
 # Input field for the license key
 license_key = st.text_input("Enter your License Key")
