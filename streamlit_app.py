@@ -1,85 +1,90 @@
 import streamlit as st
-from scipy.stats import poisson
+import requests
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
+from threading import Thread
 
-# Title of the App
-st.title("🤖 Rabiotic Football Match Outcome Predictor")
+# Flask Backend for License Key Validation
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///licenses.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
 
-# Sidebar Input
-st.sidebar.header("Input Team Data")
+# License Key Model
+class LicenseKey(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    license_key = db.Column(db.String(255), unique=True, nullable=False)
+    user_name = db.Column(db.String(255))
+    email = db.Column(db.String(255))
+    expiration_date = db.Column(db.Date, nullable=False)
+    plan_type = db.Column(db.String(50))
+    platforms = db.Column(db.String(50))
+    is_active = db.Column(db.Boolean, default=True)
 
-st.sidebar.subheader("Home Team")
-avg_home_goals_scored = st.sidebar.number_input("Average Goals Scored (Home)", min_value=0.0, value=1.5, step=0.1)
-avg_home_goals_conceded = st.sidebar.number_input("Average Goals Conceded (Home)", min_value=0.0, value=1.2, step=0.1)
-avg_home_points = st.sidebar.number_input("Average Points (Home)", min_value=0.0, value=1.8, step=0.1)
+# Initialize the database
+with app.app_context():
+    db.create_all()
 
-st.sidebar.subheader("Away Team")
-avg_away_goals_scored = st.sidebar.number_input("Average Goals Scored (Away)", min_value=0.0, value=1.2, step=0.1)
-avg_away_goals_conceded = st.sidebar.number_input("Average Goals Conceded (Away)", min_value=0.0, value=1.3, step=0.1)
-avg_away_points = st.sidebar.number_input("Average Points (Away)", min_value=0.0, value=1.4, step=0.1)
+@app.route('/validate_key', methods=['POST'])
+def validate_key():
+    data = request.json
+    license_key = data.get("license_key")
 
-st.sidebar.subheader("League Averages")
-league_avg_goals_scored = st.sidebar.number_input("League Average Goals Scored per Match", min_value=0.1, value=1.5, step=0.1)
-league_avg_goals_conceded = st.sidebar.number_input("League Average Goals Conceded per Match", min_value=0.1, value=1.5, step=0.1)
+    if not license_key:
+        return jsonify({"status": "error", "message": "License key is required."}), 400
 
-# Calculate Attack and Defense Strengths
-home_attack_strength = avg_home_goals_scored / league_avg_goals_scored
-home_defense_strength = avg_home_goals_conceded / league_avg_goals_conceded
+    key = LicenseKey.query.filter_by(license_key=license_key).first()
 
-away_attack_strength = avg_away_goals_scored / league_avg_goals_scored
-away_defense_strength = avg_away_goals_conceded / league_avg_goals_conceded
+    if not key:
+        return jsonify({"status": "error", "message": "Invalid license key."}), 404
 
-# Calculate Expected Goals
-home_expected_goals = home_attack_strength * away_defense_strength * league_avg_goals_scored
-away_expected_goals = away_attack_strength * home_defense_strength * league_avg_goals_scored
+    if not key.is_active:
+        return jsonify({"status": "error", "message": "License key is inactive."}), 403
 
-# Display Calculated Strengths and Expected Goals
-st.subheader("Calculated Strengths")
-st.write(f"**Home Attack Strength:** {home_attack_strength:.2f}")
-st.write(f"**Home Defense Strength:** {home_defense_strength:.2f}")
-st.write(f"**Away Attack Strength:** {away_attack_strength:.2f}")
-st.write(f"**Away Defense Strength:** {away_defense_strength:.2f}")
+    if key.expiration_date < datetime.now().date():
+        return jsonify({"status": "error", "message": "License key has expired."}), 403
 
-st.subheader("Expected Goals")
-st.write(f"**Home Team Expected Goals:** {home_expected_goals:.2f}")
-st.write(f"**Away Team Expected Goals:** {away_expected_goals:.2f}")
+    return jsonify({
+        "status": "success",
+        "license_info": {
+            "user_name": key.user_name,
+            "email": key.email,
+            "expiration_date": key.expiration_date,
+            "plan_type": key.plan_type,
+            "platforms": key.platforms
+        }
+    })
 
-# Function to Calculate Score Probabilities
-def calculate_score_probabilities(home_goals, away_goals):
-    home_probs = poisson.pmf(home_goals, home_expected_goals)
-    away_probs = poisson.pmf(away_goals, away_expected_goals)
-    return home_probs * away_probs
+# Run Flask in a separate thread
+def run_flask():
+    app.run(port=5000, debug=False, use_reloader=False)
 
-# Predict Probabilities for Scorelines
-st.subheader("Scoreline Probabilities")
-max_goals = st.slider("Max Goals to Display", min_value=3, max_value=10, value=5)
-probabilities = {}
+Thread(target=run_flask).start()
 
-for home_goals in range(max_goals + 1):
-    for away_goals in range(max_goals + 1):
-        prob = calculate_score_probabilities(home_goals, away_goals)
-        probabilities[(home_goals, away_goals)] = prob
+# Streamlit App Interface
+st.title("License Key Validation and Bot Activation")
 
-# Display Probabilities as a Table
-st.write("Probabilities for Each Scoreline:")
-prob_table = {
-    "Home Goals": [],
-    "Away Goals": [],
-    "Probability (%)": [],
-}
+# Form for entering license key
+with st.form("License Validation"):
+    license_key = st.text_input("Enter your License Key")
+    submit_button = st.form_submit_button("Validate License")
 
-for (home_goals, away_goals), prob in probabilities.items():
-    prob_table["Home Goals"].append(home_goals)
-    prob_table["Away Goals"].append(away_goals)
-    prob_table["Probability (%)"].append(round(prob * 100, 2))
+if submit_button:
+    if license_key:
+        # Call the Flask API
+        api_url = "http://localhost:5000/validate_key"
+        response = requests.post(api_url, json={"license_key": license_key})
 
-st.dataframe(prob_table)
+        if response.status_code == 200:
+            data = response.json()
+            st.success("License Validated!")
+            st.write("License Details:")
+            st.json(data["license_info"])
+            st.info("You can now start the bot!")
+        else:
+            error_message = response.json().get("message", "Unknown error")
+            st.error(f"Validation Failed: {error_message}")
+    else:
+        st.warning("Please enter a license key.")
 
-# Recommend Most Likely Scoreline
-most_likely_scoreline = max(probabilities, key=probabilities.get)
-most_likely_prob = probabilities[most_likely_scoreline] * 100
-
-st.subheader("Most Likely Outcome")
-st.write(
-    f"The most likely scoreline is **{most_likely_scoreline[0]}-{most_likely_scoreline[1]}** "
-    f"with a probability of **{most_likely_prob:.2f}%**."
-)
