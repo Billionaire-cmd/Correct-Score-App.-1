@@ -1,31 +1,16 @@
-from flask import Flask, request, jsonify
+import streamlit as st
+from tinydb import TinyDB, Query
 from datetime import datetime
 import secrets
-from tinydb import TinyDB, Query
-from tinydb.operations import delete
 
-app = Flask(__name__)
+# Setup TinyDB
+db = TinyDB("license_keys.json")
+License = Query()
 
-# Initialize TinyDB
-db = TinyDB('license_keys.json')
-licenses = db.table('licenses')
-
-# Generate license key
-@app.route('/generate_license', methods=['POST'])
-def generate_license():
-    data = request.json
-    user_name = data.get("user_name")
-    email = data.get("email")
-    expiration_date = data.get("expiration_date")
-    plan_type = data.get("plan_type")
-    platforms = ",".join(data.get("platforms", []))
-
-    if not (user_name and email and expiration_date and plan_type and platforms):
-        return jsonify({"status": "error", "message": "Missing required fields."}), 400
-
+# Generate License Key Function
+def generate_license_key(user_name, email, expiration_date, plan_type, platforms):
     license_key = f"RBT-{secrets.token_hex(8).upper()}"
-
-    licenses.insert({
+    db.insert({
         "license_key": license_key,
         "user_name": user_name,
         "email": email,
@@ -34,37 +19,59 @@ def generate_license():
         "platforms": platforms,
         "is_active": True
     })
+    return license_key
 
-    return jsonify({"status": "success", "license_key": license_key})
-
-# Validate license key
-@app.route('/validate_license', methods=['POST'])
-def validate_license():
-    data = request.json
-    license_key = data.get("license_key")
-
-    License = Query()
-    result = licenses.get(License.license_key == license_key)
-
+# Validate License Key Function
+def validate_license_key(license_key):
+    result = db.search(License.license_key == license_key)
     if not result:
-        return jsonify({"status": "error", "message": "License key not found."}), 404
+        return {"status": "error", "message": "License key not found."}
+    
+    license_info = result[0]
+    if not license_info["is_active"]:
+        return {"status": "error", "message": "License key is inactive."}
+    
+    if datetime.strptime(license_info["expiration_date"], "%Y-%m-%d") < datetime.now():
+        return {"status": "error", "message": "License key has expired."}
 
-    if not result["is_active"]:
-        return jsonify({"status": "error", "message": "License key is inactive."}), 403
+    return {"status": "success", "license_info": license_info}
 
-    if datetime.strptime(result["expiration_date"], "%Y-%m-%d") < datetime.now():
-        return jsonify({"status": "error", "message": "License key has expired."}), 403
+# Streamlit App
+st.title("License Key Management System")
 
-    return jsonify({
-        "status": "success",
-        "license_info": {
-            "user_name": result["user_name"],
-            "email": result["email"],
-            "expiration_date": result["expiration_date"],
-            "plan_type": result["plan_type"],
-            "platforms": result["platforms"].split(",")
-        }
-    })
+# Tabs for Generate and Validate
+tab1, tab2 = st.tabs(["Generate License Key", "Validate License Key"])
 
-if __name__ == '__main__':
-    app.run(debug=True)
+# Generate License Key
+with tab1:
+    st.header("Generate a New License Key")
+    user_name = st.text_input("User Name")
+    email = st.text_input("Email")
+    expiration_date = st.date_input("Expiration Date", min_value=datetime.now().date())
+    plan_type = st.selectbox("Plan Type", ["Basic", "Premium", "Enterprise"])
+    platforms = st.multiselect("Platforms", ["MT4", "MT5", "Other"])
+
+    if st.button("Generate License Key"):
+        if user_name and email and platforms:
+            license_key = generate_license_key(
+                user_name, email, expiration_date.strftime("%Y-%m-%d"), plan_type, platforms
+            )
+            st.success(f"License Key Generated: {license_key}")
+        else:
+            st.error("Please fill all the required fields.")
+
+# Validate License Key
+with tab2:
+    st.header("Validate an Existing License Key")
+    license_key_to_validate = st.text_input("Enter License Key to Validate")
+
+    if st.button("Validate License Key"):
+        if license_key_to_validate:
+            validation_result = validate_license_key(license_key_to_validate)
+            if validation_result["status"] == "success":
+                st.success("License Key is valid!")
+                st.json(validation_result["license_info"])
+            else:
+                st.error(validation_result["message"])
+        else:
+            st.error("Please enter a License Key.")
