@@ -7,4 +7,5 @@ altair
 flask-sqlalchemy
 flask-cors
 flask
-sqlite3
+tinydb
+flask tinydb
